@@ -1,6 +1,8 @@
 # homebridge-bambu-lab
 
-Homebridge dynamic platform plugin for controlling one or more **Bambu Lab printers** over the local MQTT interface.
+Homebridge dynamic platform plugin for controlling one or more **Bambu Lab printers** over the local MQTT interface. With support for HKSV to view and record printer camera streams, local motion detection, print state monitoring, and print control.
+
+This project started when I was too lazy to open the Bambu app to turn off the chamber light and wanted to just say `"Hey Siri, turn off the printer light."` And like any good developer, I decided to timesink _15 hours_ into a Homebridge plugin to save myself _15 seconds_.
 
 ## Features
 
