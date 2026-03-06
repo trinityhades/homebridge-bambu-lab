@@ -1,0 +1,485 @@
+<style>
+  .bambu-toolbar {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+
+  .printer-card {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.75rem;
+    margin-bottom: 1rem;
+    overflow: hidden;
+  }
+
+  .printer-card .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .printer-meta {
+    color: var(--secondary);
+    font-size: 0.9rem;
+  }
+
+  .section-title {
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+  }
+
+  .required-marker {
+    color: #dc3545;
+  }
+
+  .empty-state {
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+    text-align: center;
+    color: var(--secondary);
+  }
+</style>
+
+<div class="container-fluid px-0">
+  <div class="card mb-3">
+    <div class="card-body">
+      <div class="bambu-toolbar">
+        <div>
+          <h4 class="mb-1">Bambu Printer Configuration</h4>
+          <p class="text-muted mb-0">Add multiple Bambu printers, choose each model, and set custom accessory names.</p>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <button id="add-printer" class="btn btn-outline-primary">Add Printer</button>
+          <button id="save-config" class="btn btn-primary">Save Configuration</button>
+        </div>
+      </div>
+
+      <div class="form-group mb-0">
+        <label for="platform-name">Platform Name <span class="required-marker">*</span></label>
+        <input id="platform-name" class="form-control" type="text" placeholder="Homebridge Bambu Plugin">
+        <small class="form-text text-muted">This is the Homebridge platform block name. Printer names are configured individually below.</small>
+      </div>
+    </div>
+  </div>
+
+  <div id="printer-list"></div>
+</div>
+
+<script>
+  (() => {
+    const defaultPlatformName = 'Homebridge Bambu Plugin';
+    const defaultPrinter = {
+      name: '',
+      model: '',
+      ipAddress: '',
+      serialNumber: '',
+      lanAccessCode: '',
+      mqttPort: 8883,
+      mqttUsername: 'bblp',
+      rejectUnauthorized: false,
+      enableSpeedControl: false,
+      enableCamera: true,
+      cameraName: '',
+      cameraRtspUrl: '',
+      ffmpegPath: 'ffmpeg',
+      cameraVideoCodec: '',
+      enableHksv: false,
+      enableLocalMotionDetection: false,
+      motionSensitivity: 40,
+      hksvPrebufferLengthMs: 4000,
+      hksvFragmentLengthMs: 4000,
+      hksvMaxRecordingSeconds: 20,
+    };
+
+    const state = {
+      schema: null,
+      platformAlias: 'Homebridge Bambu Plugin',
+      configBlock: null,
+      printers: [],
+      modelOptions: [],
+      codecOptions: [],
+    };
+
+    function makeId() {
+      return Math.random().toString(36).slice(2, 10);
+    }
+
+    function clonePrinter(printer = {}) {
+      return {
+        ...defaultPrinter,
+        ...printer,
+        _id: printer._id || makeId(),
+      };
+    }
+
+    function normalizeLegacyPrinter(block) {
+      if (!block || !block.ipAddress || !block.serialNumber || !block.lanAccessCode) {
+        return null;
+      }
+
+      return clonePrinter({
+        name: block.name && block.name !== defaultPlatformName ? block.name : '',
+        model: block.model || 'Bambu Printer',
+        ipAddress: block.ipAddress,
+        serialNumber: block.serialNumber,
+        lanAccessCode: block.lanAccessCode,
+        mqttPort: block.mqttPort,
+        mqttUsername: block.mqttUsername,
+        rejectUnauthorized: block.rejectUnauthorized,
+        enableSpeedControl: block.enableSpeedControl,
+        enableCamera: block.enableCamera,
+        cameraName: block.cameraName,
+        cameraRtspUrl: block.cameraRtspUrl,
+        ffmpegPath: block.ffmpegPath,
+        cameraVideoCodec: block.cameraVideoCodec,
+        enableHksv: block.enableHksv,
+        enableLocalMotionDetection: block.enableLocalMotionDetection,
+        motionSensitivity: block.motionSensitivity,
+        hksvPrebufferLengthMs: block.hksvPrebufferLengthMs,
+        hksvFragmentLengthMs: block.hksvFragmentLengthMs,
+        hksvMaxRecordingSeconds: block.hksvMaxRecordingSeconds,
+      });
+    }
+
+    function normalizeBlock(block) {
+      const normalized = {
+        platform: block?.platform || state.platformAlias,
+        name: block?.name || defaultPlatformName,
+        printers: [],
+      };
+
+      if (Array.isArray(block?.printers)) {
+        normalized.printers = block.printers.map((printer) => clonePrinter(printer));
+      } else {
+        const legacyPrinter = normalizeLegacyPrinter(block);
+        if (legacyPrinter) {
+          normalized.printers = [legacyPrinter];
+          normalized.name = defaultPlatformName;
+        }
+      }
+
+      return normalized;
+    }
+
+    function getOptions(propertyName) {
+      const property = state.schema?.schema?.properties?.printers?.items?.properties?.[propertyName];
+      const options = property?.oneOf || [];
+      return options.map((option) => ({
+        value: Array.isArray(option.enum) ? option.enum[0] : '',
+        title: option.title || (Array.isArray(option.enum) ? option.enum[0] : ''),
+      }));
+    }
+
+    function field(label, name, value, placeholder = '', type = 'text', help = '') {
+      return `
+        <div class="form-group col-md-6">
+          <label>${label}</label>
+          <input class="form-control" data-field="${name}" type="${type}" value="${escapeHtml(value ?? '')}" placeholder="${escapeHtml(placeholder)}">
+          ${help ? `<small class="form-text text-muted">${help}</small>` : ''}
+        </div>
+      `;
+    }
+
+    function numberField(label, name, value, min, max, help = '') {
+      return `
+        <div class="form-group col-md-4">
+          <label>${label}</label>
+          <input class="form-control" data-field="${name}" type="number" value="${escapeHtml(String(value ?? ''))}" min="${min}" max="${max}">
+          ${help ? `<small class="form-text text-muted">${help}</small>` : ''}
+        </div>
+      `;
+    }
+
+    function checkbox(label, name, checked, help = '') {
+      return `
+        <div class="form-group col-md-4 d-flex align-items-start">
+          <div class="form-check mt-4">
+            <input class="form-check-input" data-field="${name}" type="checkbox" ${checked ? 'checked' : ''}>
+            <label class="form-check-label">${label}</label>
+            ${help ? `<small class="form-text text-muted">${help}</small>` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    function selectField(label, name, value, options, help = '') {
+      const placeholder = name === 'cameraVideoCodec' ? '<option value="">Use platform default</option>' : '<option value="">Select a model...</option>';
+      const renderedOptions = [placeholder]
+        .concat(options.map((option) => {
+          const selected = option.value === value ? 'selected' : '';
+          return `<option value="${escapeHtml(option.value)}" ${selected}>${escapeHtml(option.title)}</option>`;
+        }))
+        .join('');
+
+      return `
+        <div class="form-group col-md-6">
+          <label>${label}</label>
+          <select class="form-control" data-field="${name}">
+            ${renderedOptions}
+          </select>
+          ${help ? `<small class="form-text text-muted">${help}</small>` : ''}
+        </div>
+      `;
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function render() {
+      const printerList = document.getElementById('printer-list');
+      const platformName = document.getElementById('platform-name');
+      platformName.value = state.configBlock?.name || defaultPlatformName;
+
+      if (state.printers.length === 0) {
+        printerList.innerHTML = `
+          <div class="empty-state">
+            <p class="mb-3">No printers configured yet.</p>
+            <button class="btn btn-outline-primary" id="empty-add-printer">Add Your First Printer</button>
+          </div>
+        `;
+
+        document.getElementById('empty-add-printer').addEventListener('click', addPrinter);
+        return;
+      }
+
+      printerList.innerHTML = state.printers.map((printer, index) => {
+        const title = printer.name || `Printer ${index + 1}`;
+        const subtitle = [printer.model || 'Model not selected', printer.serialNumber || 'No serial number'].join(' • ');
+
+        return `
+          <div class="card printer-card" data-printer-id="${printer._id}">
+            <div class="card-header">
+              <div>
+                <div class="h5 mb-0">${escapeHtml(title)}</div>
+                <div class="printer-meta">${escapeHtml(subtitle)}</div>
+              </div>
+              <button class="btn btn-outline-danger btn-sm" data-action="remove-printer">Remove</button>
+            </div>
+            <div class="card-body">
+              <div class="section-title">Printer Basics</div>
+              <div class="form-row">
+                ${field('Printer Name *', 'name', printer.name, 'Office Printer')}
+                ${selectField('Printer Model *', 'model', printer.model, state.modelOptions, 'Used for HomeKit Accessory Information metadata.')}
+                ${field('Printer IP Address *', 'ipAddress', printer.ipAddress, '192.168.1.50')}
+                ${field('Printer Serial Number *', 'serialNumber', printer.serialNumber)}
+                ${field('LAN Access Code *', 'lanAccessCode', printer.lanAccessCode, '', 'password')}
+                ${numberField('MQTT Port', 'mqttPort', printer.mqttPort, 1, 65535)}
+                ${field('MQTT Username', 'mqttUsername', printer.mqttUsername, 'bblp')}
+                ${checkbox('Verify TLS Certificate', 'rejectUnauthorized', printer.rejectUnauthorized)}
+              </div>
+
+              <div class="section-title">Accessories</div>
+              <div class="form-row">
+                ${checkbox('Enable Print Speed Control', 'enableSpeedControl', printer.enableSpeedControl)}
+                ${checkbox('Enable Camera Accessory', 'enableCamera', printer.enableCamera)}
+                ${checkbox('Enable HomeKit Secure Video', 'enableHksv', printer.enableHksv)}
+                ${checkbox('Enable Local Motion Detection', 'enableLocalMotionDetection', printer.enableLocalMotionDetection)}
+              </div>
+
+              <div class="section-title">Camera</div>
+              <div class="form-row">
+                ${field('Camera Accessory Name', 'cameraName', printer.cameraName, `${printer.name || 'Printer'} Camera`)}
+                ${field('Camera Stream URL', 'cameraRtspUrl', printer.cameraRtspUrl, 'rtsps://bblp:lanAccessCode@192.168.1.50:322/streaming/live/1')}
+                ${field('ffmpeg Path', 'ffmpegPath', printer.ffmpegPath, 'ffmpeg')}
+                ${selectField('Camera Video Encoder', 'cameraVideoCodec', printer.cameraVideoCodec, state.codecOptions)}
+              </div>
+
+              <div class="section-title">Motion & HKSV</div>
+              <div class="form-row">
+                ${numberField('Motion Sensitivity', 'motionSensitivity', printer.motionSensitivity, 1, 100)}
+                ${numberField('HKSV Prebuffer (ms)', 'hksvPrebufferLengthMs', printer.hksvPrebufferLengthMs, 4000, 8000)}
+                ${numberField('HKSV Fragment Length (ms)', 'hksvFragmentLengthMs', printer.hksvFragmentLengthMs, 2000, 8000)}
+                ${numberField('HKSV Max Recording Seconds', 'hksvMaxRecordingSeconds', printer.hksvMaxRecordingSeconds, 5, 120)}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      attachPrinterListeners();
+    }
+
+    function attachPrinterListeners() {
+      document.querySelectorAll('[data-printer-id]').forEach((card) => {
+        const printerId = card.getAttribute('data-printer-id');
+        const printer = state.printers.find((entry) => entry._id === printerId);
+        if (!printer) {
+          return;
+        }
+
+        card.querySelectorAll('[data-field]').forEach((input) => {
+          input.addEventListener('input', (event) => {
+            updatePrinter(printer, event.target);
+          });
+          input.addEventListener('change', (event) => {
+            updatePrinter(printer, event.target);
+          });
+        });
+
+        const removeButton = card.querySelector('[data-action="remove-printer"]');
+        removeButton.addEventListener('click', () => {
+          state.printers = state.printers.filter((entry) => entry._id !== printerId);
+          render();
+        });
+      });
+    }
+
+    function updatePrinter(printer, target) {
+      const fieldName = target.getAttribute('data-field');
+      if (!fieldName) {
+        return;
+      }
+
+      if (target.type === 'checkbox') {
+        printer[fieldName] = target.checked;
+      } else if (target.type === 'number') {
+        printer[fieldName] = target.value === '' ? '' : Number(target.value);
+      } else {
+        printer[fieldName] = target.value;
+      }
+
+      if (fieldName === 'name' || fieldName === 'model' || fieldName === 'serialNumber') {
+        render();
+      }
+    }
+
+    function addPrinter() {
+      state.printers.push(clonePrinter());
+      render();
+    }
+
+    function validate() {
+      const platformName = document.getElementById('platform-name').value.trim();
+      if (!platformName) {
+        throw new Error('Platform name is required.');
+      }
+
+      if (state.printers.length === 0) {
+        throw new Error('Add at least one printer before saving.');
+      }
+
+      const seenSerials = new Set();
+      state.printers.forEach((printer, index) => {
+        const label = printer.name || `Printer ${index + 1}`;
+        ['name', 'model', 'ipAddress', 'serialNumber', 'lanAccessCode'].forEach((fieldName) => {
+          if (!String(printer[fieldName] || '').trim()) {
+            throw new Error(`${label}: ${fieldName} is required.`);
+          }
+        });
+
+        const serial = printer.serialNumber.trim();
+        if (seenSerials.has(serial)) {
+          throw new Error(`Duplicate serial number detected: ${serial}`);
+        }
+
+        seenSerials.add(serial);
+      });
+
+      return platformName;
+    }
+
+    function cleanPrinter(printer) {
+      const cleaned = {
+        name: printer.name.trim(),
+        model: printer.model.trim(),
+        ipAddress: printer.ipAddress.trim(),
+        serialNumber: printer.serialNumber.trim(),
+        lanAccessCode: printer.lanAccessCode.trim(),
+        mqttPort: Number(printer.mqttPort || 8883),
+        mqttUsername: (printer.mqttUsername || 'bblp').trim(),
+        rejectUnauthorized: Boolean(printer.rejectUnauthorized),
+        enableSpeedControl: Boolean(printer.enableSpeedControl),
+        enableCamera: Boolean(printer.enableCamera),
+        enableHksv: Boolean(printer.enableHksv),
+        enableLocalMotionDetection: Boolean(printer.enableLocalMotionDetection),
+        motionSensitivity: Number(printer.motionSensitivity || 40),
+        hksvPrebufferLengthMs: Number(printer.hksvPrebufferLengthMs || 4000),
+        hksvFragmentLengthMs: Number(printer.hksvFragmentLengthMs || 4000),
+        hksvMaxRecordingSeconds: Number(printer.hksvMaxRecordingSeconds || 20),
+      };
+
+      ['cameraName', 'cameraRtspUrl', 'ffmpegPath', 'cameraVideoCodec'].forEach((fieldName) => {
+        const value = String(printer[fieldName] || '').trim();
+        if (value) {
+          cleaned[fieldName] = value;
+        }
+      });
+
+      if (!cleaned.enableCamera) {
+        delete cleaned.cameraName;
+        delete cleaned.cameraRtspUrl;
+      }
+
+      if (!cleaned.ffmpegPath) {
+        delete cleaned.ffmpegPath;
+      }
+
+      return cleaned;
+    }
+
+    async function saveConfig() {
+      try {
+        const platformName = validate();
+        homebridge.showSpinner();
+
+        const block = {
+          platform: state.platformAlias,
+          name: platformName,
+          printers: state.printers.map(cleanPrinter),
+        };
+
+        await homebridge.updatePluginConfig([block]);
+        await homebridge.savePluginConfig();
+        state.configBlock = normalizeBlock(block);
+        state.printers = state.configBlock.printers;
+        render();
+        homebridge.toast.success('Bambu printer configuration saved.');
+      } catch (error) {
+        homebridge.toast.error(error.message || String(error), 'Unable to save');
+      } finally {
+        homebridge.hideSpinner();
+      }
+    }
+
+    async function init() {
+      try {
+        homebridge.showSpinner();
+        state.schema = await homebridge.getPluginConfigSchema();
+        state.platformAlias = state.schema?.pluginAlias || state.platformAlias;
+        state.modelOptions = getOptions('model');
+        state.codecOptions = getOptions('cameraVideoCodec');
+
+        const blocks = await homebridge.getPluginConfig();
+        const firstBlock = blocks[0] || { platform: state.platformAlias, name: defaultPlatformName, printers: [] };
+        state.configBlock = normalizeBlock(firstBlock);
+        state.printers = state.configBlock.printers;
+
+        document.getElementById('add-printer').addEventListener('click', addPrinter);
+        document.getElementById('save-config').addEventListener('click', () => {
+          void saveConfig();
+        });
+
+        render();
+      } catch (error) {
+        homebridge.toast.error(error.message || String(error), 'Unable to load settings');
+      } finally {
+        homebridge.hideSpinner();
+      }
+    }
+
+    homebridge.addEventListener('ready', () => {
+      void init();
+    });
+  })();
+</script>
