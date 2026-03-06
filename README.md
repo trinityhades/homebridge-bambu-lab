@@ -1,10 +1,8 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/trinityhades/homebridge-bambu-lab/refs/heads/main/homebridge-bambu-lab-logo.png" width="300">
+  <img src="https://raw.githubusercontent.com/trinityhades/homebridge-bambu-lab/refs/heads/main/homebridge-bambu-logo.png" width="600">
 </p>
 
 <span align="center">
-
-# Homebridge Bambu Lab
 
 [![npm](https://img.shields.io/npm/v/homebridge-bambu-lab.svg)](https://www.npmjs.com/package/homebridge-bambu-lab)
 [![npm](https://img.shields.io/npm/dt/homebridge-bambu-lab.svg)](https://www.npmjs.com/package/homebridge-bambu-lab)
@@ -15,6 +13,8 @@
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Donate-yellow.svg)](https://www.buymeacoffee.com/trinityhades)
 
 </span>
+
+# Homebridge Bambu Lab
 
 Homebridge dynamic platform plugin for controlling one or more **Bambu Lab printers** over the local MQTT interface. With support for HKSV to view and record printer camera streams, local motion detection, print state monitoring, and print control.
 
