@@ -1,8 +1,6 @@
 import { createSocket, type Socket } from 'node:dgram';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, statSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 
 import type {
   CameraController,
@@ -102,7 +100,7 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
     const serialNumber = this.platform.getPrinterSerialNumber(this.context.printerId);
     const serialHash = serialNumber.split('').reduce((acc: number, current: string) => acc + current.charCodeAt(0), 0);
     this.relayPort = 20000 + (serialHash % 10000);
-    this.snapshotTmpPath = join(tmpdir(), `bambu-${serialNumber}-snapshot.jpg`);
+    this.snapshotTmpPath = this.platform.getStoragePath(`bambu-${serialNumber}-snapshot.jpg`);
 
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Bambu Lab')
@@ -211,20 +209,21 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
     this.platform.log.info(`Snapshot request ${width}x${height}`);
 
     if (existsSync(this.snapshotTmpPath)) {
-      const ageMs = Date.now() - statSync(this.snapshotTmpPath).mtimeMs;
-      if (ageMs < SNAPSHOT_MAX_AGE_MS) {
-        if (ageMs >= SNAPSHOT_STALE_WARN_MS) {
-          this.platform.log.warn(`Snapshot tmpfile is stale (${Math.round(ageMs / 1000)}s old); returning it anyway.`);
-        }
+      try {
+        const ageMs = Date.now() - statSync(this.snapshotTmpPath).mtimeMs;
+        if (ageMs < SNAPSHOT_MAX_AGE_MS) {
+          if (ageMs >= SNAPSHOT_STALE_WARN_MS) {
+            this.platform.log.warn(`Snapshot cache is stale (${Math.round(ageMs / 1000)}s old); returning it anyway.`);
+          }
 
-        try {
           const data = readFileSync(this.snapshotTmpPath);
-          this.platform.log.info(`Snapshot from tmpfile (${data.length} bytes, ${Math.round(ageMs / 1000)}s old)`);
+          this.platform.log.info(`Snapshot from cache (${data.length} bytes, ${Math.round(ageMs / 1000)}s old)`);
           callback(undefined, data);
           return;
-        } catch {
-          // fallback below
         }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.platform.log.debug(`Unable to reuse cached snapshot: ${message}`);
       }
     }
 

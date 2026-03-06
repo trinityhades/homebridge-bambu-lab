@@ -8,6 +8,9 @@ import type {
   Service,
 } from 'homebridge';
 
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+
 import mqtt from 'mqtt';
 import type { IClientOptions, MqttClient } from 'mqtt';
 
@@ -91,6 +94,7 @@ export class BambuPlatform implements DynamicPlatformPlugin {
   private readonly accessoryHandlers: Map<string, BambuPrinterAccessory> = new Map();
   private readonly configTyped: BambuPlatformConfig;
   private readonly printers: Map<string, ManagedPrinter> = new Map();
+  private readonly storagePath: string;
 
   constructor(
     public readonly log: Logging,
@@ -100,14 +104,18 @@ export class BambuPlatform implements DynamicPlatformPlugin {
     this.Service = api.hap.Service;
     this.Characteristic = api.hap.Characteristic;
     this.configTyped = config as BambuPlatformConfig;
+    this.storagePath = join(this.api.user.storagePath(), PLUGIN_NAME);
+    mkdirSync(this.storagePath, { recursive: true });
 
     this.log.debug('Finished initializing platform:', this.config.name);
 
     this.api.on('didFinishLaunching', () => {
       this.log.debug('Executed didFinishLaunching callback');
-      this.initializePrinters();
-      this.discoverDevices();
-      this.connectMqttClients();
+      this.handleDidFinishLaunching();
+    });
+
+    this.api.on('shutdown', () => {
+      this.shutdown();
     });
   }
 
@@ -151,6 +159,10 @@ export class BambuPlatform implements DynamicPlatformPlugin {
 
   getFfmpegPath(printerId: string): string {
     return this.printers.get(printerId)?.config.ffmpegPath ?? 'ffmpeg';
+  }
+
+  getStoragePath(...paths: string[]): string {
+    return join(this.storagePath, ...paths);
   }
 
   getCameraVideoCodec(printerId: string): 'libx264' | 'h264_videotoolbox' {
@@ -305,44 +317,40 @@ export class BambuPlatform implements DynamicPlatformPlugin {
       }
 
       for (const device of devices) {
-        const uuid = this.api.hap.uuid.generate(device.uniqueId);
-        const existingAccessory = this.accessories.get(uuid);
+        try {
+          const uuid = this.api.hap.uuid.generate(device.uniqueId);
+          const existingAccessory = this.accessories.get(uuid);
 
-        if (existingAccessory) {
-          this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
-          existingAccessory.context.device = device;
-          existingAccessory.displayName = device.displayName;
+          if (existingAccessory) {
+            this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
+            existingAccessory.context.device = device;
+            existingAccessory.displayName = device.displayName;
 
-          if (device.kind === 'camera') {
-            existingAccessory.category = this.api.hap.Categories.IP_CAMERA;
-          }
+            if (device.kind === 'camera') {
+              existingAccessory.category = this.api.hap.Categories.IP_CAMERA;
+            }
 
-          this.api.updatePlatformAccessories([existingAccessory]);
-          this.accessories.set(uuid, existingAccessory);
-
-          if (device.kind === 'camera') {
-            new BambuCameraAccessory(this, existingAccessory);
+            this.api.updatePlatformAccessories([existingAccessory]);
+            this.accessories.set(uuid, existingAccessory);
+            this.createAccessoryHandler(device.kind, existingAccessory);
           } else {
-            new BambuPrinterAccessory(this, existingAccessory);
-          }
-        } else {
-          this.log.info('Adding new accessory:', device.displayName);
+            this.log.info('Adding new accessory:', device.displayName);
 
-          const category = device.kind === 'camera' ? this.api.hap.Categories.IP_CAMERA : undefined;
-          const accessory = new this.api.platformAccessory(device.displayName, uuid, category);
-          accessory.context.device = device;
+            const category = device.kind === 'camera' ? this.api.hap.Categories.IP_CAMERA : undefined;
+            const accessory = new this.api.platformAccessory(device.displayName, uuid, category);
+            accessory.context.device = device;
 
-          if (device.kind === 'camera') {
-            new BambuCameraAccessory(this, accessory);
-          } else {
-            new BambuPrinterAccessory(this, accessory);
+            this.createAccessoryHandler(device.kind, accessory);
+
+            this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+            this.accessories.set(uuid, accessory);
           }
 
-          this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
-          this.accessories.set(uuid, accessory);
+          discoveredCacheUUIDs.push(uuid);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.log.error(`Failed to initialize accessory ${device.displayName}: ${message}`);
         }
-
-        discoveredCacheUUIDs.push(uuid);
       }
     }
 
@@ -377,7 +385,35 @@ export class BambuPlatform implements DynamicPlatformPlugin {
 
   private connectMqttClients() {
     for (const printerId of this.printers.keys()) {
-      this.connectMqtt(printerId);
+      try {
+        this.connectMqtt(printerId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const printerName = this.printers.get(printerId)?.config.name ?? printerId;
+        this.log.error(`Failed to start MQTT client for ${printerName}: ${message}`);
+      }
+    }
+  }
+
+  private handleDidFinishLaunching() {
+    try {
+      this.initializePrinters();
+      this.discoverDevices();
+      this.connectMqttClients();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.log.error(`Platform startup failed: ${message}`);
+    }
+  }
+
+  private shutdown() {
+    for (const printer of this.printers.values()) {
+      try {
+        printer.mqttClient?.end(true);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.log.warn(`Error while closing MQTT client for ${printer.config.name}: ${message}`);
+      }
     }
   }
 
@@ -568,6 +604,14 @@ export class BambuPlatform implements DynamicPlatformPlugin {
         handler.syncState(this.getState(printerId));
       }
     }
+  }
+
+  private createAccessoryHandler(kind: AccessoryKind, accessory: PlatformAccessory) {
+    if (kind === 'camera') {
+      return new BambuCameraAccessory(this, accessory);
+    }
+
+    return new BambuPrinterAccessory(this, accessory);
   }
 
   private getRequiredPrinter(printerId: string): ManagedPrinter {

@@ -3,17 +3,16 @@
   "displayName": "Homebridge Bambu Plugin",
   "type": "module",
   "version": "1.0.0",
-  "private": true,
   "description": "Homebridge plugin to control one or more Bambu Lab printers over local MQTT.",
   "author": "Homebridge Community",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/USERNAME/homebridge-bambu-lab#readme",
+  "homepage": "https://github.com/trinityhades/homebridge-bambu-lab#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/USERNAME/homebridge-bambu-lab.git"
+    "url": "https://github.com/trinityhades/homebridge-bambu-lab.git"
   },
   "bugs": {
-    "url": "https://github.com/USERNAME/homebridge-bambu-lab/issues"
+    "url": "https://github.com/trinityhades/homebridge-bambu-lab/issues"
   },
   "keywords": [
     "homebridge-plugin",
