@@ -7,9 +7,7 @@
 [![npm](https://img.shields.io/npm/v/homebridge-bambu-lab.svg)](https://www.npmjs.com/package/homebridge-bambu-lab)
 [![npm](https://img.shields.io/npm/dt/homebridge-bambu-lab.svg)](https://www.npmjs.com/package/homebridge-bambu-lab)
 [![License](https://img.shields.io/npm/l/homebridge-bambu-lab.svg)](https://github.com/trinityhades/homebridge-bambu-lab/blob/main/LICENSE)
-[![Homebridge](https://img.shields.io/badge/homebridge-%3E%3D1.8.0-blue)](https://github.com/homebridge/homebridge)
-[![Node](https://img.shields.io/node/v/homebridge-bambu-lab.svg)](https://www.npmjs.com/package/homebridge-bambu-lab)
-
+[![verified-by-homebridge](https://img.shields.io/badge/homebridge-verified-blueviolet?color=%23491F59&style=flat)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Donate-yellow.svg)](https://www.buymeacoffee.com/trinityhades)
 
 </span>
