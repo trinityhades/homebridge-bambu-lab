@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/trinityhades/homebridge-bambu-lab/refs/heads/main/homebridge-bambu-logo.png" width="600">
+  <img src="https://raw.githubusercontent.com/trinityhades/homebridge-bambu-lab/refs/heads/main/public/homebridge-bambu-logo.png" width="600">
 </p>
 
 <span align="center">
