@@ -2,7 +2,7 @@
   "name": "homebridge-bambu-lab",
   "displayName": "Homebridge Bambu Plugin",
   "type": "module",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Homebridge plugin to control one or more Bambu Lab printers over local MQTT.",
   "author": "Homebridge Community",
   "license": "Apache-2.0",
