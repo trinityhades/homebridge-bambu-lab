@@ -74,6 +74,8 @@ const DEFAULT_PRINTER_NAME = 'Bambu Printer';
 const DEFAULT_PRINTER_MODEL = 'Bambu Printer';
 const DEFAULT_MQTT_PORT = 8883;
 const DEFAULT_MQTT_USERNAME = 'bblp';
+const DEFAULT_CAMERA_RTSP_PORT = 322;
+const DEFAULT_CAMERA_RTSP_PATH = '/streaming/live/1';
 
 function createDefaultState(): PrinterState {
   return {
@@ -154,7 +156,12 @@ export class BambuPlatform implements DynamicPlatformPlugin {
       return printer.config.cameraRtspUrl;
     }
 
-    return `rtsps://${printer.config.mqttUsername ?? DEFAULT_MQTT_USERNAME}:${printer.config.lanAccessCode}@${printer.config.ipAddress}:322/streaming/live/1`;
+    return this.buildDefaultCameraStreamUrl(printer.config);
+  }
+
+  isUsingDefaultCameraStreamUrl(printerId: string): boolean {
+    const printer = this.printers.get(printerId);
+    return printer != null && !printer.config.cameraRtspUrl;
   }
 
   getFfmpegPath(printerId: string): string {
@@ -657,6 +664,10 @@ export class BambuPlatform implements DynamicPlatformPlugin {
         lanAccessCode,
         mqttUsername: this.normalizeString(printer.mqttUsername) ?? DEFAULT_MQTT_USERNAME,
         mqttPort: typeof printer.mqttPort === 'number' ? printer.mqttPort : DEFAULT_MQTT_PORT,
+        cameraRtspUrl: this.normalizeString(printer.cameraRtspUrl),
+        cameraName: this.normalizeString(printer.cameraName),
+        ffmpegPath: this.normalizeString(printer.ffmpegPath),
+        enableCamera: this.shouldEnableCamera(printer),
       });
     });
 
@@ -710,6 +721,20 @@ export class BambuPlatform implements DynamicPlatformPlugin {
     const normalizedModel = model === DEFAULT_PRINTER_MODEL ? DEFAULT_PRINTER_NAME : model;
     const suffix = serialNumber.length >= 4 ? serialNumber.slice(-4) : `${index + 1}`;
     return `${normalizedModel} ${suffix}`;
+  }
+
+  private buildDefaultCameraStreamUrl(printer: ManagedPrinter['config']): string {
+    return `rtsps://${printer.mqttUsername ?? DEFAULT_MQTT_USERNAME}`
+      + `:${printer.lanAccessCode}@${printer.ipAddress}`
+      + `:${DEFAULT_CAMERA_RTSP_PORT}${DEFAULT_CAMERA_RTSP_PATH}`;
+  }
+
+  private shouldEnableCamera(printer: BambuPrinterConfig): boolean {
+    if (printer.enableCamera === true || printer.enableCamera === false) {
+      return printer.enableCamera;
+    }
+
+    return this.normalizeString(printer.cameraRtspUrl) != null;
   }
 
   private normalizeString(value: unknown): string | undefined {

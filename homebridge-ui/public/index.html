@@ -83,7 +83,7 @@
       mqttUsername: 'bblp',
       rejectUnauthorized: false,
       enableSpeedControl: false,
-      enableCamera: true,
+      enableCamera: false,
       cameraName: '',
       cameraRtspUrl: '',
       ffmpegPath: 'ffmpeg',
@@ -390,6 +390,7 @@
     }
 
     function cleanPrinter(printer) {
+      const cameraRtspUrl = String(printer.cameraRtspUrl || '').trim();
       const cleaned = {
         name: printer.name.trim(),
         model: printer.model.trim(),
@@ -400,7 +401,7 @@
         mqttUsername: (printer.mqttUsername || 'bblp').trim(),
         rejectUnauthorized: Boolean(printer.rejectUnauthorized),
         enableSpeedControl: Boolean(printer.enableSpeedControl),
-        enableCamera: Boolean(printer.enableCamera),
+        enableCamera: Boolean(printer.enableCamera) || cameraRtspUrl.length > 0,
         enableHksv: Boolean(printer.enableHksv),
         enableLocalMotionDetection: Boolean(printer.enableLocalMotionDetection),
         motionSensitivity: Number(printer.motionSensitivity || 40),

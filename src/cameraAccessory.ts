@@ -292,6 +292,7 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
         this.platform.log.error(`Snapshot timed out after ${snapshotTimeoutMs}ms (${width}x${height})`);
       } else if (details.length > 0) {
         this.platform.log.error(`Snapshot ffmpeg failed code=${code}: ${details}`);
+        this.logDefaultCameraEndpointHint(details);
       } else {
         this.platform.log.error(`Snapshot ffmpeg failed code=${code}`);
       }
@@ -429,6 +430,7 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
           const details = stderrBuffer.trim();
           if (details.length > 0) {
             this.platform.log.error(`Camera ffmpeg failed (${sessionId}) code=${code}: ${details}`);
+            this.logDefaultCameraEndpointHint(details);
           } else {
             this.platform.log.error(`Camera ffmpeg failed (${sessionId}) code=${code}`);
           }
@@ -816,6 +818,7 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
         const details = stderrBuffer.trim();
         if (details.length > 0) {
           this.platform.log.error(`Unified pipeline failed code=${code}: ${details}`);
+          this.logDefaultCameraEndpointHint(details);
         } else {
           this.platform.log.error(`Unified pipeline failed code=${code}`);
         }
@@ -872,6 +875,22 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
     this.recordingInitSegment = undefined;
     this.motionFrameBuffer = Buffer.alloc(0);
     this.previousMotionFrame = undefined;
+  }
+
+  private logDefaultCameraEndpointHint(details: string): void {
+    if (!this.platform.isUsingDefaultCameraStreamUrl(this.context.printerId)) {
+      return;
+    }
+
+    if (!/connection refused/i.test(details)) {
+      return;
+    }
+
+    this.platform.log.warn(
+      'The default Bambu camera endpoint was refused. '
+      + 'Enable the camera only for printers with a reachable LAN stream, '
+      + 'or set cameraRtspUrl to the correct endpoint for this model.',
+    );
   }
 
   private startRecordingMonitor(): void {

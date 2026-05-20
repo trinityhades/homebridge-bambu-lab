@@ -93,9 +93,9 @@
             },
             "enableCamera": {
               "title": "Enable Camera Accessory",
-              "description": "Adds a HomeKit camera accessory and streams from the printer RTSPS endpoint.",
+              "description": "Adds a HomeKit camera accessory. Enable this only when the printer has a reachable LAN camera stream, or provide a custom camera URL.",
               "type": "boolean",
-              "default": true
+              "default": false
             },
             "cameraName": {
               "title": "Camera Accessory Name",
@@ -104,7 +104,7 @@
             },
             "cameraRtspUrl": {
               "title": "Camera Stream URL",
-              "description": "Optional custom camera URL. Leave empty to auto-build from printer IP and LAN access code.",
+              "description": "Optional custom camera URL. Leave empty to use the default Bambu RTSPS endpoint when the camera accessory is enabled.",
               "type": "string",
               "placeholder": "rtsps://bblp:lanAccessCode@192.168.1.50:322/streaming/live/1"
             },

@@ -80,7 +80,9 @@ Manual `config.json` example:
 
 ## Camera Notes
 
+- Camera is opt-in. Set `enableCamera: true` when the printer exposes a reachable LAN camera stream, or provide `cameraRtspUrl` to use a custom endpoint.
 - If `cameraRtspUrl` is omitted, the plugin auto-builds: `rtsps://<mqttUsername>:<lanAccessCode>@<ipAddress>:322/streaming/live/1`.
+- If ffmpeg reports `Connection refused` for the auto-built `:322` URL, that printer likely does not expose the default LAN stream at that endpoint. Disable the camera or override `cameraRtspUrl` with the correct stream URL.
 - `ffmpeg` must be installed and available in PATH, or configured with `ffmpegPath` per printer.
 - `enableHksv` turns on HomeKit Secure Video recording services.
 - `enableLocalMotionDetection` runs a local frame-difference detector and updates a Motion Sensor characteristic.
