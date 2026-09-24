@@ -94,6 +94,7 @@ export class BambuPlatform implements DynamicPlatformPlugin {
   public readonly accessories: Map<string, PlatformAccessory> = new Map();
 
   private readonly accessoryHandlers: Map<string, BambuPrinterAccessory> = new Map();
+  private readonly cameraHandlers = new Map<string, BambuCameraAccessory>();
   private readonly configTyped: BambuPlatformConfig;
   private readonly printers: Map<string, ManagedPrinter> = new Map();
   private readonly storagePath: string;
@@ -132,6 +133,8 @@ export class BambuPlatform implements DynamicPlatformPlugin {
 
   unregisterAccessoryHandler(accessoryUUID: string) {
     this.accessoryHandlers.delete(accessoryUUID);
+    this.cameraHandlers.get(accessoryUUID)?.shutdown();
+    this.cameraHandlers.delete(accessoryUUID);
   }
 
   getState(printerId: string): PrinterState {
@@ -414,6 +417,10 @@ export class BambuPlatform implements DynamicPlatformPlugin {
   }
 
   private shutdown() {
+    for (const camera of this.cameraHandlers.values()) {
+      camera.shutdown();
+    }
+
     for (const printer of this.printers.values()) {
       try {
         printer.mqttClient?.end(true);
@@ -615,7 +622,10 @@ export class BambuPlatform implements DynamicPlatformPlugin {
 
   private createAccessoryHandler(kind: AccessoryKind, accessory: PlatformAccessory) {
     if (kind === 'camera') {
-      return new BambuCameraAccessory(this, accessory);
+      this.cameraHandlers.get(accessory.UUID)?.shutdown();
+      const camera = new BambuCameraAccessory(this, accessory);
+      this.cameraHandlers.set(accessory.UUID, camera);
+      return camera;
     }
 
     return new BambuPrinterAccessory(this, accessory);

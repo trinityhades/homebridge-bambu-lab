@@ -27,6 +27,7 @@ const RELAY_GOP = RELAY_FPS;
 const SNAPSHOT_INTERVAL_FPS = 0.2;
 const SNAPSHOT_MAX_AGE_MS = 60_000;
 const SNAPSHOT_STALE_WARN_MS = 30_000;
+const FFMPEG_STOP_TIMEOUT_MS = 5000;
 
 interface CameraSessionInfo {
   videoSSRC: number;
@@ -68,6 +69,9 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
   private readonly ongoingSessions = new Map<string, ChildProcess>();
   private readonly returnSockets = new Map<string, Socket>();
   private readonly stoppingSessions = new Set<string>();
+  private readonly terminationTimers = new Map<ChildProcess, NodeJS.Timeout>();
+  private readonly snapshotProcesses = new Set<ChildProcess>();
+  private shuttingDown = false;
 
   private recordingActive = false;
   private recordingConfig?: CameraRecordingConfiguration;
@@ -256,9 +260,10 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
       'pipe:1',
     ];
 
-    this.platform.log.info(`Snapshot ffmpeg args: ${args.join(' ')}`);
+    this.platform.log.info(`Snapshot ffmpeg source=${this.safeEndpoint(sourceUrl)} resolution=${width}x${height}`);
 
     const ffmpegProcess = spawn(ffmpegPath, args, { env: process.env });
+    this.snapshotProcesses.add(ffmpegProcess);
 
     const chunks: Buffer[] = [];
     let stderr = '';
@@ -278,6 +283,8 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
     });
 
     ffmpegProcess.on('close', (code) => {
+      this.snapshotProcesses.delete(ffmpegProcess);
+      this.clearTerminationTimer(ffmpegProcess);
       completed = true;
       clearTimeout(timeout);
 
@@ -287,7 +294,7 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
         return;
       }
 
-      const details = stderr.trim();
+      const details = this.redactCameraLog(stderr.trim(), sourceUrl);
       if (timedOut) {
         this.platform.log.error(`Snapshot timed out after ${snapshotTimeoutMs}ms (${width}x${height})`);
       } else if (details.length > 0) {
@@ -297,7 +304,7 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
         this.platform.log.error(`Snapshot ffmpeg failed code=${code}`);
       }
 
-      callback(new Error(`Snapshot ffmpeg exited code=${code}. ${stderr.trim()}`));
+      callback(new Error(`Snapshot ffmpeg exited code=${code}. ${details}`));
     });
 
     ffmpegProcess.on('error', (error) => {
@@ -318,9 +325,19 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
   handleStreamRequest(request: StreamingRequest, callback: StreamRequestCallback): void {
     const sessionId = request.sessionID;
 
+    if (this.shuttingDown) {
+      callback(new Error('Camera accessory is shutting down.'));
+      return;
+    }
+
     switch (request.type) {
     case this.platform.api.hap.StreamRequestTypes.START: {
       this.stopOtherSessions(sessionId);
+
+      if (this.ongoingSessions.has(sessionId)) {
+        callback(new Error(`Camera session ${sessionId} is still running.`));
+        return;
+      }
 
       const sessionInfo = this.pendingSessions.get(sessionId);
       if (!sessionInfo) {
@@ -401,7 +418,11 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
       ];
 
       this.platform.log.info(`Starting camera stream (${sessionId}) via ${pipelineRunning ? 'relay' : 'direct'}`);
-      this.platform.log.info(`Camera ffmpeg args (${sessionId}): ${args.join(' ')}`);
+      this.platform.log.info(
+        `Camera ffmpeg (${sessionId}) source=${this.safeEndpoint(pipelineRunning ? sourceInputArgs[1] : streamUrl!)}`
+        + ` codec=${videoCodec} resolution=${outputWidth}x${outputHeight}`
+        + ` fps=${outputFps} bitrate=${maxBitrate}kbps`,
+      );
 
       const ffmpegProcess = spawn(ffmpegPath, args, { env: process.env });
       this.ongoingSessions.set(sessionId, ffmpegProcess);
@@ -412,16 +433,18 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
       ffmpegProcess.stderr.on('data', (data: Buffer) => {
         const message = data.toString().trim();
         if (message.length > 0) {
-          stderrBuffer = (stderrBuffer + '\n' + message).slice(-4000);
-          this.platform.log.info(`Camera ffmpeg (${sessionId}): ${message}`);
+          const safeMessage = this.redactCameraLog(message, streamUrl, srtpParams);
+          stderrBuffer = (stderrBuffer + '\n' + safeMessage).slice(-4000);
+          this.platform.log.info(`Camera ffmpeg (${sessionId}): ${safeMessage}`);
         }
       });
 
       ffmpegProcess.on('error', (error) => {
-        this.platform.log.error(`Camera ffmpeg error (${sessionId}): ${error.message}`);
+        this.platform.log.error(`Camera ffmpeg error (${sessionId}): ${this.redactCameraLog(error.message, streamUrl, srtpParams)}`);
       });
 
       ffmpegProcess.on('close', (code, signal) => {
+        this.clearTerminationTimer(ffmpegProcess);
         const expectedStop = this.stoppingSessions.has(sessionId)
           || signal === 'SIGTERM'
           || signal === 'SIGKILL';
@@ -437,8 +460,11 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
         }
 
         this.platform.log.info(`Camera stream stopped (${sessionId}) code=${code} signal=${signal ?? 'none'}`);
-        this.stoppingSessions.delete(sessionId);
-        this.ongoingSessions.delete(sessionId);
+        if (this.ongoingSessions.get(sessionId) === ffmpegProcess) {
+          this.stoppingSessions.delete(sessionId);
+          this.ongoingSessions.delete(sessionId);
+          this.closeReturnSocket(sessionId);
+        }
       });
 
       callback();
@@ -579,6 +605,10 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
   }
 
   private updateUnifiedPipelineState(): void {
+    if (this.shuttingDown) {
+      return;
+    }
+
     const hasHksv = this.platform.isHksvEnabled(this.context.printerId) && !!this.recordingActive && this.recordingConfig != null;
     const hasMotion = this.platform.isLocalMotionDetectionEnabled(this.context.printerId);
 
@@ -755,7 +785,7 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
       ...outputArgs,
     ];
 
-    this.platform.log.info(`Unified pipeline ffmpeg args: ${args.join(' ')}`);
+    this.platform.log.info(`Unified pipeline ffmpeg source=${this.safeEndpoint(streamUrl)} codec=${codec}`);
 
     const stdioConfig: Array<'ignore' | 'pipe'> = needsPipe3
       ? ['ignore', 'pipe', 'pipe', 'pipe']
@@ -802,11 +832,13 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
         return;
       }
 
-      stderrBuffer = (stderrBuffer + '\n' + message).slice(-4000);
-      this.platform.log.debug(`Unified pipeline: ${message}`);
+      const safeMessage = this.redactCameraLog(message, streamUrl);
+      stderrBuffer = (stderrBuffer + '\n' + safeMessage).slice(-4000);
+      this.platform.log.debug(`Unified pipeline: ${safeMessage}`);
     });
 
     processRef.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
+      this.clearTerminationTimer(processRef);
       const expectedStop = signal === 'SIGTERM' || signal === 'SIGKILL';
 
       if (this.recordingCurrentFragment.length > 0) {
@@ -824,10 +856,12 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
         }
       }
 
-      this.unifiedProcess = undefined;
+      if (this.unifiedProcess === processRef) {
+        this.unifiedProcess = undefined;
+      }
       this.platform.log.info(`Unified pipeline stopped code=${code} signal=${signal ?? 'none'}`);
 
-      if (!expectedStop && (hasHksv || hasMotion)) {
+      if (!this.shuttingDown && !expectedStop && (hasHksv || hasMotion)) {
         this.unifiedRestartTimer = setTimeout(() => {
           this.unifiedRestartTimer = undefined;
           this.updateUnifiedPipelineState();
@@ -836,7 +870,7 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
     });
 
     processRef.on('error', (error: Error) => {
-      this.platform.log.error(`Unified pipeline spawn error: ${error.message}`);
+      this.platform.log.error(`Unified pipeline spawn error: ${this.redactCameraLog(error.message, streamUrl)}`);
     });
   }
 
@@ -847,7 +881,7 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
     }
 
     if (this.unifiedProcess) {
-      this.unifiedProcess.kill('SIGTERM');
+      this.terminateProcess(this.unifiedProcess, 'Unified pipeline');
       this.unifiedProcess = undefined;
     }
 
@@ -1124,7 +1158,17 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
     };
 
     try {
+      if (this.shuttingDown) {
+        safeCallback(new Error('Camera accessory is shutting down.'));
+        return;
+      }
+
       const { port: videoPort, socket: returnSocket } = await this.bindReturnPort();
+      if (this.shuttingDown) {
+        returnSocket.close();
+        safeCallback(new Error('Camera accessory is shutting down.'));
+        return;
+      }
       const videoSSRC = this.randomSsrc();
 
       this.platform.log.info(
@@ -1206,14 +1250,88 @@ export class BambuCameraAccessory implements CameraStreamingDelegate, CameraReco
 
   private stopSession(sessionId: string): void {
     const ffmpegProcess = this.ongoingSessions.get(sessionId);
-    if (!ffmpegProcess) {
+    if (ffmpegProcess && !this.stoppingSessions.has(sessionId)) {
+      this.stoppingSessions.add(sessionId);
+      this.terminateProcess(ffmpegProcess, `Camera stream (${sessionId})`);
+    }
+
+    this.closeReturnSocket(sessionId);
+  }
+
+  shutdown(): void {
+    if (this.shuttingDown) {
       return;
     }
 
-    this.stoppingSessions.add(sessionId);
-    ffmpegProcess.kill('SIGTERM');
-    this.ongoingSessions.delete(sessionId);
-    this.closeReturnSocket(sessionId);
+    this.shuttingDown = true;
+    for (const sessionId of this.ongoingSessions.keys()) {
+      this.stopSession(sessionId);
+    }
+
+    this.pendingSessions.clear();
+    for (const sessionId of this.returnSockets.keys()) {
+      this.closeReturnSocket(sessionId);
+    }
+
+    for (const processRef of this.snapshotProcesses) {
+      this.terminateProcess(processRef, 'Snapshot');
+    }
+
+    this.stopUnifiedPipeline();
+    if (this.recordingMonitorTimer) {
+      clearInterval(this.recordingMonitorTimer);
+      this.recordingMonitorTimer = undefined;
+    }
+
+    if (this.motionResetTimer) {
+      clearTimeout(this.motionResetTimer);
+      this.motionResetTimer = undefined;
+    }
+  }
+
+  private terminateProcess(processRef: ChildProcess, label: string): void {
+    if (this.terminationTimers.has(processRef) || processRef.exitCode !== null || processRef.signalCode !== null) {
+      return;
+    }
+
+    processRef.kill('SIGTERM');
+    const timer = setTimeout(() => {
+      this.terminationTimers.delete(processRef);
+      if (processRef.exitCode === null && processRef.signalCode === null) {
+        this.platform.log.warn(`${label} did not exit after SIGTERM; sending SIGKILL.`);
+        processRef.kill('SIGKILL');
+      }
+    }, FFMPEG_STOP_TIMEOUT_MS);
+    this.terminationTimers.set(processRef, timer);
+    processRef.once('exit', () => this.clearTerminationTimer(processRef));
+  }
+
+  private clearTerminationTimer(processRef: ChildProcess): void {
+    const timer = this.terminationTimers.get(processRef);
+    if (timer) {
+      clearTimeout(timer);
+      this.terminationTimers.delete(processRef);
+    }
+  }
+
+  private safeEndpoint(sourceUrl: string): string {
+    try {
+      const url = new URL(sourceUrl);
+      return `${url.protocol}//${url.host}`;
+    } catch {
+      return '[camera source]';
+    }
+  }
+
+  private redactCameraLog(message: string, sourceUrl?: string, srtpParams?: string): string {
+    let safe = sourceUrl ? message.replaceAll(sourceUrl, this.safeEndpoint(sourceUrl)) : message;
+    if (srtpParams) {
+      safe = safe.replaceAll(srtpParams, '[REDACTED]');
+    }
+
+    return safe
+      .replace(/(?:rtsps?|https?):\/\/[^\s'"<>]+/gi, (url) => this.safeEndpoint(url))
+      .replace(/-srtp_out_params\s+[^\s]+/gi, '[SRTP parameters redacted]');
   }
 
   private closeReturnSocket(sessionId: string): void {
