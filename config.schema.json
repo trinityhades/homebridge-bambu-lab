@@ -42,6 +42,7 @@
                 { "title": "P2S", "enum": ["P2S"] },
                 { "title": "X1 Carbon", "enum": ["X1 Carbon"] },
                 { "title": "X1E", "enum": ["X1E"] },
+                { "title": "X2D", "enum": ["X2D"] },
                 { "title": "H2D", "enum": ["H2D"] },
                 { "title": "H2D Pro", "enum": ["H2D Pro"] },
                 { "title": "H2C", "enum": ["H2C"] },
