@@ -26,7 +26,7 @@ This project started when I was too lazy to open the Bambu app to turn off the c
 - Subscribes to `device/<serial>/report` for printer state updates.
 - Exposes HomeKit accessories per printer:
   - **Lightbulb**: chamber light on/off.
-  - **Switch**: pause/resume active print.
+  - **Optional Switch**: pause/resume active print (enabled by default).
   - **Optional Fan**: print speed override slider.
   - **Optional Camera**: HomeKit camera accessory for the printer stream.
 - Publishes commands to `device/<serial>/request`.
@@ -52,6 +52,7 @@ Manual `config.json` example:
       "mqttPort": 8883,
       "mqttUsername": "bblp",
       "rejectUnauthorized": false,
+      "enablePrintControl": true,
       "enableSpeedControl": true,
       "enableCamera": true,
       "cameraName": "Office Printer Camera",
