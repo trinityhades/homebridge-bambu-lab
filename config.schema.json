@@ -85,6 +85,12 @@
               "type": "boolean",
               "default": false
             },
+            "enablePrintControl": {
+              "title": "Enable Print Pause Switch",
+              "description": "Adds a HomeKit switch accessory that can pause or resume the active print.",
+              "type": "boolean",
+              "default": true
+            },
             "enableSpeedControl": {
               "title": "Enable Print Speed Control",
               "description": "Adds a HomeKit slider accessory to set the print speed profile.",

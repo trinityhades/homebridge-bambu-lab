@@ -82,6 +82,7 @@
       mqttPort: 8883,
       mqttUsername: 'bblp',
       rejectUnauthorized: false,
+      enablePrintControl: true,
       enableSpeedControl: false,
       enableCamera: false,
       cameraName: '',
@@ -131,6 +132,7 @@
         mqttPort: block.mqttPort,
         mqttUsername: block.mqttUsername,
         rejectUnauthorized: block.rejectUnauthorized,
+        enablePrintControl: block.enablePrintControl !== false,
         enableSpeedControl: block.enableSpeedControl,
         enableCamera: block.enableCamera,
         cameraName: block.cameraName,
@@ -281,6 +283,7 @@
 
               <div class="section-title">Accessories</div>
               <div class="form-row">
+                ${checkbox('Enable Print Pause Switch', 'enablePrintControl', printer.enablePrintControl)}
                 ${checkbox('Enable Print Speed Control', 'enableSpeedControl', printer.enableSpeedControl)}
                 ${checkbox('Enable Camera Accessory', 'enableCamera', printer.enableCamera)}
                 ${checkbox('Enable HomeKit Secure Video', 'enableHksv', printer.enableHksv)}
@@ -400,6 +403,7 @@
         mqttPort: Number(printer.mqttPort || 8883),
         mqttUsername: (printer.mqttUsername || 'bblp').trim(),
         rejectUnauthorized: Boolean(printer.rejectUnauthorized),
+        enablePrintControl: printer.enablePrintControl !== false,
         enableSpeedControl: Boolean(printer.enableSpeedControl),
         enableCamera: Boolean(printer.enableCamera) || cameraRtspUrl.length > 0,
         enableHksv: Boolean(printer.enableHksv),

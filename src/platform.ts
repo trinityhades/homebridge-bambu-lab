@@ -27,6 +27,7 @@ export interface BambuPrinterConfig {
   mqttPort?: number;
   mqttUsername?: string;
   rejectUnauthorized?: boolean;
+  enablePrintControl?: boolean;
   enableSpeedControl?: boolean;
   enableCamera?: boolean;
   cameraRtspUrl?: string;
@@ -291,15 +292,18 @@ export class BambuPlatform implements DynamicPlatformPlugin {
           displayName: `${baseName} Chamber Light`,
           kind: 'light',
         },
-        {
+      ];
+
+      if (printer.config.enablePrintControl !== false) {
+        devices.push({
           printerId,
           serialNumber: printer.config.serialNumber,
           model: printer.config.model,
           uniqueId: `${printer.config.serialNumber}-print-control`,
           displayName: `${baseName} Print`,
           kind: 'printControl',
-        },
-      ];
+        });
+      }
 
       if (printer.config.enableSpeedControl) {
         devices.push({
@@ -691,6 +695,7 @@ export class BambuPlatform implements DynamicPlatformPlugin {
         mqttPort: this.configTyped.mqttPort,
         mqttUsername: this.configTyped.mqttUsername,
         rejectUnauthorized: this.configTyped.rejectUnauthorized,
+        enablePrintControl: this.configTyped.enablePrintControl,
         enableSpeedControl: this.configTyped.enableSpeedControl,
         enableCamera: this.configTyped.enableCamera,
         cameraRtspUrl: this.configTyped.cameraRtspUrl,
